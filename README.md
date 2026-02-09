@@ -41,12 +41,12 @@ This will:
 ### 3. Install Python dependencies
 
 ```bash
-uv sync              # base: huggingface-hub, datasets, transformers
-uv sync --extra vllm # + vLLM (for OpenJury with local models)
+uv sync
 ```
 
-This creates a `.venv` with pinned, compatible versions (notably `transformers<5`
-to avoid vLLM breakage).
+This creates a `.venv` with pinned, compatible versions (`huggingface-hub`,
+`datasets`, `transformers<5`) needed for downloading and caching. Runtime
+dependencies like vLLM are managed by OpenJury's own `pyproject.toml`.
 
 ### 4. Source the environment
 

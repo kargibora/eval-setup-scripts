@@ -14,12 +14,5 @@ dependencies = [
     "transformers>=4.44.0,<5",
 ]
 
-[project.optional-dependencies]
-# Full stack for running OpenJury evaluations locally
-vllm = [
-    "vllm==0.10.2",
-]
-
 [tool.uv]
-# uv-specific settings
 dev-dependencies = []
