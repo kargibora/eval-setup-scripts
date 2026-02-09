@@ -387,6 +387,21 @@ class HFCacheManager:
         """Print human-friendly cache summary."""
         import glob
 
+        def _dir_size(path: Path) -> int:
+            total = 0
+            if path.exists():
+                for entry in path.rglob("*"):
+                    if entry.is_file():
+                        total += entry.stat().st_size
+            return total
+
+        def _fmt(n: int) -> str:
+            for unit in ("B", "KB", "MB", "GB", "TB"):
+                if n < 1024:
+                    return f"{n:.1f} {unit}"
+                n /= 1024
+            return f"{n:.1f} PB"
+
         stats = self.get_cache_stats()
         print("📊 Cache Status")
         print(f"   HF_HOME  : {self.hf_home}")
@@ -394,13 +409,86 @@ class HFCacheManager:
         print(f"   Datasets : {stats['datasets_size_str']}")
         print(f"   Total    : {stats['total_size_str']}")
 
-        # List cached model snapshots
+        # List cached model snapshots with individual sizes
         snapshots = sorted(glob.glob(str(self.hub_cache / "models--*")))
         if snapshots:
-            print(f"\n   Cached models ({len(snapshots)}):")
+            print(f"\n   📦 Cached models ({len(snapshots)}):")
             for s in snapshots:
                 name = Path(s).name.replace("models--", "").replace("--", "/")
-                print(f"     • {name}")
+                size = _fmt(_dir_size(Path(s)))
+                print(f"     • {name}  ({size})")
+
+        # List cached datasets
+        ds_dirs = sorted(glob.glob(str(self.datasets_cache / "*")))
+        ds_dirs = [d for d in ds_dirs if Path(d).is_dir()
+                   and not Path(d).name.startswith(".")]
+        if ds_dirs:
+            print(f"\n   📂 Cached datasets ({len(ds_dirs)}):")
+            for d in ds_dirs:
+                name = Path(d).name.replace("___", "/")
+                size = _fmt(_dir_size(Path(d)))
+                print(f"     • {name}  ({size})")
+
+        # Check for stale lock files
+        locks = list(self.hf_home.rglob("*.lock"))
+        if locks:
+            print(f"\n   ⚠️  {len(locks)} stale lock file(s) found")
+            print(f"      Run: python bin/hf_cache_manager.py clean")
+
+    # ───────────────────────────────────────────────────────────────
+    #  Clean cache
+    # ───────────────────────────────────────────────────────────────
+    def clean(self, dry_run: bool = False) -> int:
+        """Remove stale lock files and orphaned incomplete downloads.
+
+        Args:
+            dry_run: If True, only print what would be deleted.
+
+        Returns:
+            Number of items cleaned.
+        """
+        cleaned = 0
+
+        # Remove .lock files
+        locks = list(self.hf_home.rglob("*.lock"))
+        if locks:
+            print(f"🔒 Found {len(locks)} lock file(s):")
+            for lf in locks:
+                print(f"   {'[DRY RUN] ' if dry_run else ''}rm {lf}")
+                if not dry_run:
+                    lf.unlink()
+                cleaned += 1
+
+        # Remove incomplete downloads (.incomplete in hub)
+        incompletes = list(self.hub_cache.rglob("*.incomplete"))
+        if incompletes:
+            print(f"⚠️  Found {len(incompletes)} incomplete download(s):")
+            for inc in incompletes:
+                print(f"   {'[DRY RUN] ' if dry_run else ''}rm {inc}")
+                if not dry_run:
+                    inc.unlink()
+                cleaned += 1
+
+        # Remove misplaced datasets-- entries in hub/
+        import glob as _glob
+        misplaced = sorted(_glob.glob(str(self.hub_cache / "datasets--*")))
+        if misplaced:
+            import shutil
+            print(f"🔀 Found {len(misplaced)} misplaced dataset(s) in hub/:")
+            for mp in misplaced:
+                print(f"   {'[DRY RUN] ' if dry_run else ''}rm -rf {mp}")
+                if not dry_run:
+                    shutil.rmtree(mp)
+                cleaned += 1
+
+        if cleaned == 0:
+            print("✅ Cache is clean – nothing to remove.")
+        else:
+            action = "would be" if dry_run else "were"
+            print(f"\n{'='*50}")
+            print(f"🧹 {cleaned} item(s) {action} cleaned.")
+
+        return cleaned
 
     # ───────────────────────────────────────────────────────────────
     #  Verify offline readiness
@@ -504,9 +592,17 @@ def main():
         "filepath",
         help="Path to file listing models/datasets (see examples/)",
     )
+    p.add_argument(
+        "--dry-run", action="store_true",
+        help="Only print what would be downloaded, don't actually download",
+    )
 
     # ── status ──
     sub.add_parser("status", help="Show cache status")
+
+    # ── clean ──
+    p = sub.add_parser("clean", help="Remove stale locks, incomplete downloads")
+    p.add_argument("--dry-run", action="store_true", help="Only show what would be deleted")
 
     # ── verify ──
     p = sub.add_parser("verify", help="Check if model/dataset are cached for offline use")
@@ -535,8 +631,26 @@ def main():
         sys.exit(0 if ok else 1)
 
     elif args.command == "download-from-file":
+        if args.dry_run:
+            path = Path(args.filepath)
+            if not path.exists():
+                print(f"❌ File not found: {args.filepath}")
+                sys.exit(1)
+            print("🔍 Dry run – would download:")
+            for raw_line in path.read_text().splitlines():
+                line = raw_line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if line.startswith("dataset:"):
+                    print(f"   📂 dataset: {line[len('dataset:'):]}") 
+                else:
+                    print(f"   📦 model:   {line}")
+            sys.exit(0)
         successes, failures = hf.download_from_file(args.filepath)
         sys.exit(0 if failures == 0 else 1)
+
+    elif args.command == "clean":
+        hf.clean(dry_run=args.dry_run)
 
     elif args.command == "status":
         hf.print_cache_status()

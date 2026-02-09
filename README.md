@@ -29,14 +29,20 @@ cd scripts
 
 ```bash
 bash setup.sh
+# or non-interactive:
+bash setup.sh --account OELLM_prod2026
+# to re-run later:
+bash setup.sh --reconfigure
 ```
 
 This will:
 - Detect your username
-- Ask for your SLURM account (e.g. `OELLM_prod2026`)
+- Ask for your SLURM account (validates it exists via `sacctmgr`)
 - Let you choose per-user or shared HF cache
 - Generate your personal `.env.leonardo` config
 - Optionally add auto-sourcing to `~/.bashrc`
+- Optionally run `uv sync` to install Python dependencies
+- Auto-configure oellm-cli `clusters.yaml` if found
 
 ### 3. Install Python dependencies
 
@@ -62,13 +68,20 @@ source leonardo_env.sh
 # Download everything from a file (models + datasets in one go)
 python bin/hf_cache_manager.py download-from-file examples/all.txt
 
+# Preview what would be downloaded (dry run)
+python bin/hf_cache_manager.py download-from-file examples/all.txt --dry-run
+
 # Or download individually:
 python bin/hf_cache_manager.py download-model Qwen/Qwen2.5-0.5B-Instruct
 python bin/hf_cache_manager.py download-dataset hellaswag
 python bin/hf_cache_manager.py download-dataset cais/mmlu --name all --split test
 
-# Check what's cached
+# Check what's cached (with per-model sizes)
 python bin/hf_cache_manager.py status
+
+# Remove stale locks & incomplete downloads
+python bin/hf_cache_manager.py clean
+python bin/hf_cache_manager.py clean --dry-run   # preview only
 ```
 
 See [examples/](examples/) for pre-made download lists:
@@ -80,8 +93,10 @@ See [examples/](examples/) for pre-made download lists:
 
 ```bash
 # Get an interactive GPU session
-./bin/interactive_gpu.sh            # 1 hour, 1 GPU (default)
-./bin/interactive_gpu.sh 2 4        # 2 hours, 4 GPUs
+./bin/interactive_gpu.sh                       # 1 hour, 1 GPU (default)
+./bin/interactive_gpu.sh 2 4                   # 2 hours, 4 GPUs (positional)
+./bin/interactive_gpu.sh --hours 2 --gpus 4    # same, with named args
+./bin/interactive_gpu.sh --cpus 16 --gpus 2    # 16 CPUs, 2 GPUs
 
 # Environment auto-loads with HF_HUB_OFFLINE=1
 # Your cached models are ready to use
@@ -231,8 +246,15 @@ python bin/hf_cache_manager.py download-dataset cais/mmlu --name all --split tes
 # Batch download from a file (models + datasets together)
 python bin/hf_cache_manager.py download-from-file examples/all.txt
 
-# Show cache summary (sizes + cached models)
+# Preview what a batch file would download (without downloading)
+python bin/hf_cache_manager.py download-from-file examples/all.txt --dry-run
+
+# Show cache summary (per-model/dataset sizes, lock detection)
 python bin/hf_cache_manager.py status
+
+# Remove stale lock files, .incomplete downloads, misplaced cache entries
+python bin/hf_cache_manager.py clean
+python bin/hf_cache_manager.py clean --dry-run   # preview only
 
 # Check if a model is ready for offline use
 python bin/hf_cache_manager.py verify Qwen/Qwen2.5-0.5B-Instruct
@@ -301,6 +323,7 @@ python scripts/bin/hf_cache_manager.py verify Qwen/Qwen2.5-0.5B-Instruct
 | `HF_HUB_CACHE` | `leonardo_env.sh` | Model snapshots (`hub/`) |
 | `HF_DATASETS_CACHE` | `leonardo_env.sh` | Arrow datasets (`datasets/`) |
 | `HF_HUB_OFFLINE` | `leonardo_env.sh` | Auto-set to `1` on compute nodes |
+| `HF_DATASETS_OFFLINE` | `leonardo_env.sh` | Auto-set to `1` on compute nodes |
 | `TRANSFORMERS_OFFLINE` | `leonardo_env.sh` | Auto-set to `1` on compute nodes |
 | `OPENJURY_DATA` | `leonardo_env.sh` | OpenJury dataset directory |
 | `ACCOUNT` | `.env.leonardo` | SLURM project account |

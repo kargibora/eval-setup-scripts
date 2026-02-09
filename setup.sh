@@ -7,10 +7,13 @@
 #   2. Ask for your SLURM project account
 #   3. Generate a personal config file (.env.leonardo)
 #   4. Add auto-sourcing to your ~/.bashrc
+#   5. Optionally install Python deps via uv
+#   6. Optionally configure oellm-cli clusters.yaml
 #
 # Usage:
-#   bash setup.sh
+#   bash setup.sh                            # interactive first-time setup
 #   bash setup.sh --account OELLM_prod2026   # non-interactive
+#   bash setup.sh --reconfigure              # re-run even if already configured
 # =============================================================================
 
 set -euo pipefail
@@ -31,14 +34,18 @@ err()   { echo -e "${RED}✗ ${NC}$*"; }
 #  Parse arguments
 # ═══════════════════════════════════════════════════════════════════
 ACCOUNT_ARG=""
+RECONFIGURE=false
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --account) ACCOUNT_ARG="$2"; shift 2 ;;
+        --reconfigure) RECONFIGURE=true; shift ;;
         -h|--help)
-            echo "Usage: bash setup.sh [--account SLURM_ACCOUNT]"
+            echo "Usage: bash setup.sh [OPTIONS]"
             echo ""
             echo "Options:"
-            echo "  --account    SLURM project account (e.g. OELLM_prod2026)"
+            echo "  --account ACCT    SLURM project account (e.g. OELLM_prod2026)"
+            echo "  --reconfigure     Re-run setup even if .env.leonardo exists"
+            echo "  -h, --help        Show this help"
             echo ""
             echo "If --account is not given, you will be prompted interactively."
             exit 0
@@ -46,6 +53,18 @@ while [[ $# -gt 0 ]]; do
         *) err "Unknown option: $1"; exit 1 ;;
     esac
 done
+
+# ── Guard: check for existing config ──
+if [[ -f "${CONFIG_FILE}" && "${RECONFIGURE}" == "false" ]]; then
+    warn "Config already exists: ${CONFIG_FILE}"
+    info "To re-run setup, use:  bash setup.sh --reconfigure"
+    echo ""
+    read -rp "$(echo -e ${YELLOW}"Continue anyway? [y/N]: "${NC})" CONT
+    if [[ ! "${CONT}" =~ ^[Yy]$ ]]; then
+        info "Aborted. Your existing config is unchanged."
+        exit 0
+    fi
+fi
 
 echo ""
 echo -e "${BOLD}╔═══════════════════════════════════════════════════════════╗${NC}"
@@ -81,6 +100,22 @@ fi
 if [[ -z "${ACCOUNT}" ]]; then
     err "Account cannot be empty. Aborting."
     exit 1
+fi
+
+# Validate the account exists for this user
+if command -v sacctmgr &>/dev/null; then
+    _valid_accounts=$(sacctmgr -n -p show user "${DETECTED_USER}" format=Account 2>/dev/null \
+        | tr '|' '\n' | grep -v '^$' || true)
+    if [[ -n "${_valid_accounts}" ]]; then
+        if ! echo "${_valid_accounts}" | grep -qx "${ACCOUNT}"; then
+            warn "Account '${ACCOUNT}' not found in your SLURM associations."
+            warn "Your valid accounts: $(echo ${_valid_accounts} | tr '\n' ', ')"
+            read -rp "$(echo -e ${YELLOW}"Continue anyway? [y/N]: "${NC})" FORCE
+            if [[ ! "${FORCE}" =~ ^[Yy]$ ]]; then
+                err "Aborted."; exit 1
+            fi
+        fi
+    fi
 fi
 ok "Using SLURM account: ${BOLD}${ACCOUNT}${NC}"
 
@@ -198,7 +233,51 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════════
-#  9. Summary
+#  9. Install Python dependencies via uv
+# ═══════════════════════════════════════════════════════════════════
+echo ""
+if command -v uv &>/dev/null && [[ -f "${SCRIPT_DIR}/pyproject.toml" ]]; then
+    read -rp "$(echo -e ${YELLOW}"Run 'uv sync' to install Python dependencies? [Y/n]: "${NC})" DO_UV
+    DO_UV="${DO_UV:-Y}"
+    if [[ "${DO_UV}" =~ ^[Yy]$ ]]; then
+        info "Running uv sync..."
+        (cd "${SCRIPT_DIR}" && uv sync 2>&1 | tail -5)
+        ok "Python dependencies installed."
+    else
+        warn "Skipped. Run manually:  cd ${SCRIPT_DIR} && uv sync"
+    fi
+else
+    if ! command -v uv &>/dev/null; then
+        warn "'uv' not found. Install it first, then run:  cd ${SCRIPT_DIR} && uv sync"
+    fi
+fi
+
+# ═══════════════════════════════════════════════════════════════════
+#  10. Auto-configure oellm-cli clusters.yaml
+# ═══════════════════════════════════════════════════════════════════
+_OELLM_CLI_DIR="${WORK_BASE}/oellm-cli"
+_CLUSTERS_YAML="${_OELLM_CLI_DIR}/oellm/resources/clusters.yaml"
+
+if [[ -f "${_CLUSTERS_YAML}" ]]; then
+    echo ""
+    info "Found oellm-cli at: ${_OELLM_CLI_DIR}"
+    read -rp "$(echo -e ${YELLOW}"Auto-configure clusters.yaml with your paths? [Y/n]: "${NC})" DO_OELLM
+    DO_OELLM="${DO_OELLM:-Y}"
+    if [[ "${DO_OELLM}" =~ ^[Yy]$ ]]; then
+        # Update EVAL_BASE_DIR to match this user's setup
+        _EVAL_BASE="${WORK_BASE}/oellm-evals"
+        if grep -q 'EVAL_BASE_DIR:' "${_CLUSTERS_YAML}"; then
+            sed -i "s|EVAL_BASE_DIR:.*|EVAL_BASE_DIR: \"${_EVAL_BASE}\"|" "${_CLUSTERS_YAML}"
+        fi
+        if grep -q 'ACCOUNT:' "${_CLUSTERS_YAML}"; then
+            sed -i "s|ACCOUNT:.*|ACCOUNT: \"${ACCOUNT}\"|" "${_CLUSTERS_YAML}"
+        fi
+        ok "Updated clusters.yaml (EVAL_BASE_DIR, ACCOUNT)"
+    fi
+fi
+
+# ═══════════════════════════════════════════════════════════════════
+#  11. Summary
 # ═══════════════════════════════════════════════════════════════════
 echo ""
 echo -e "${BOLD}╔═══════════════════════════════════════════════════════════╗${NC}"

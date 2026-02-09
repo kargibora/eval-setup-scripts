@@ -3,7 +3,7 @@
 # Leonardo LLM Evaluation – Environment Configuration
 # =============================================================================
 # Sources your personal .env.leonardo config and sets all environment
-# variables needed by: oellm-cli, OpenJury, HFCacheManager, TRL, vLLM.
+# variables needed by: oellm-cli, OpenJury, vLLM, and any HF-based tool.
 #
 # Usage:
 #   source leonardo_env.sh          # manual
@@ -13,36 +13,31 @@
 #   bash setup.sh
 # =============================================================================
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG_FILE="${SCRIPT_DIR}/.env.leonardo"
+_LEO_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_LEO_CONFIG_FILE="${_LEO_SCRIPT_DIR}/.env.leonardo"
 
 # ═══════════════════════════════════════════════════════════════════
 #  Load user config
 # ═══════════════════════════════════════════════════════════════════
-if [[ ! -f "${CONFIG_FILE}" ]]; then
-    echo "❌ Config file not found: ${CONFIG_FILE}"
-    echo "   Run 'bash ${SCRIPT_DIR}/setup.sh' first."
+if [[ ! -f "${_LEO_CONFIG_FILE}" ]]; then
+    echo "❌ Config file not found: ${_LEO_CONFIG_FILE}"
+    echo "   Run 'bash ${_LEO_SCRIPT_DIR}/setup.sh' first."
     return 1 2>/dev/null || exit 1
 fi
 
-# Source the config (sets LEONARDO_USER, SLURM_ACCOUNT, WORK_DIR, etc.)
-source "${CONFIG_FILE}"
+source "${_LEO_CONFIG_FILE}"
 
 # ═══════════════════════════════════════════════════════════════════
-#  User-specific paths (derived from config)
+#  Paths
 # ═══════════════════════════════════════════════════════════════════
 export USER_WORK_DIR="${WORK_DIR}"
-export SCRIPTS_DIR="${SCRIPT_DIR}"
+export SCRIPTS_DIR="${_LEO_SCRIPT_DIR}"
+export PATH="${_LEO_SCRIPT_DIR}/bin:${PATH}"
 
-# ═══════════════════════════════════════════════════════════════════
-#  Evaluation paths (oellm-cli)
-# ═══════════════════════════════════════════════════════════════════
 export EVAL_BASE_DIR="${USER_WORK_DIR}/oellm-evals"
 export EVAL_OUTPUT_DIR="${EVAL_BASE_DIR}/outputs"
 export EVAL_CONTAINER_IMAGE="eval_env-leonardo.sif"
 export EVAL_SIF_PATH="${EVAL_BASE_DIR}/${EVAL_CONTAINER_IMAGE}"
-
-mkdir -p "${EVAL_BASE_DIR}" "${EVAL_OUTPUT_DIR}" 2>/dev/null
 
 # ═══════════════════════════════════════════════════════════════════
 #  SLURM settings
@@ -79,6 +74,7 @@ export HF_DATASETS_DISABLE_PROGRESS_BARS=1
 if [[ -n "${SLURM_JOB_ID}" ]]; then
     export HF_HUB_OFFLINE=1
     export TRANSFORMERS_OFFLINE=1
+    export HF_DATASETS_OFFLINE=1
     export VLLM_NO_USAGE_STATS=1
 fi
 
@@ -86,7 +82,6 @@ fi
 #  OpenJury
 # ═══════════════════════════════════════════════════════════════════
 export OPENJURY_DATA="${USER_WORK_DIR}/openjury-eval-data"
-mkdir -p "${OPENJURY_DATA}" 2>/dev/null
 
 # ═══════════════════════════════════════════════════════════════════
 #  UV (Python package manager)
@@ -97,7 +92,6 @@ export UV_LINK_MODE="copy"
 #  SLURM logs
 # ═══════════════════════════════════════════════════════════════════
 export SLURM_LOGS_DIR="${USER_WORK_DIR}/slurm_logs"
-mkdir -p "${SLURM_LOGS_DIR}" 2>/dev/null
 
 # ═══════════════════════════════════════════════════════════════════
 #  Time limit
@@ -105,12 +99,25 @@ mkdir -p "${SLURM_LOGS_DIR}" 2>/dev/null
 export TIME_LIMIT="${DEFAULT_TIME_LIMIT:-00:30:00}"
 
 # ═══════════════════════════════════════════════════════════════════
-#  Summary
+#  Create directories (only once per session)
 # ═══════════════════════════════════════════════════════════════════
-if [[ -n "${SLURM_JOB_ID}" ]]; then
-    echo "✅ Leonardo env loaded (OFFLINE – job ${SLURM_JOB_ID})"
-else
-    echo "✅ Leonardo env loaded (ONLINE – login node)"
+if [[ -z "${_LEO_ENV_LOADED}" ]]; then
+    mkdir -p "${EVAL_BASE_DIR}" "${EVAL_OUTPUT_DIR}" \
+             "${HF_HUB_CACHE}" "${HF_DATASETS_CACHE}" \
+             "${HF_ASSETS_CACHE}" "${HF_XET_CACHE}" \
+             "${OPENJURY_DATA}" "${SLURM_LOGS_DIR}" 2>/dev/null
+    export _LEO_ENV_LOADED=1
 fi
-echo "   User:    ${LEONARDO_USER}  Account: ${ACCOUNT}"
-echo "   HF_HOME: ${HF_HOME}  (${CACHE_MODE})"
+
+# ═══════════════════════════════════════════════════════════════════
+#  Summary (only in interactive shells)
+# ═══════════════════════════════════════════════════════════════════
+if [[ $- == *i* ]] || [[ -n "${LEO_VERBOSE}" ]]; then
+    if [[ -n "${SLURM_JOB_ID}" ]]; then
+        echo "✅ Leonardo env loaded (OFFLINE – job ${SLURM_JOB_ID})"
+    else
+        echo "✅ Leonardo env loaded (ONLINE – login node)"
+    fi
+    echo "   User:    ${LEONARDO_USER}  Account: ${ACCOUNT}"
+    echo "   HF_HOME: ${HF_HOME}  (${CACHE_MODE})"
+fi
