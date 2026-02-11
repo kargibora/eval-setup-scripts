@@ -76,6 +76,7 @@ if [[ -n "${SLURM_JOB_ID}" ]]; then
     export TRANSFORMERS_OFFLINE=1
     export HF_DATASETS_OFFLINE=1
     export VLLM_NO_USAGE_STATS=1
+    export UV_NO_SYNC=1    # Skip uv sync on compute nodes (no PyPI access)
 fi
 
 # ═══════════════════════════════════════════════════════════════════
@@ -112,7 +113,7 @@ fi
 # ═══════════════════════════════════════════════════════════════════
 #  Summary (only in interactive shells)
 # ═══════════════════════════════════════════════════════════════════
-if [[ $- == *i* ]] || [[ -n "${LEO_VERBOSE}" ]]; then
+if [[ $- == *i* ]] || [[ -n "${LEO_VERBOSE:-}" ]]; then
     if [[ -n "${SLURM_JOB_ID}" ]]; then
         echo "✅ Leonardo env loaded (OFFLINE – job ${SLURM_JOB_ID})"
     else
