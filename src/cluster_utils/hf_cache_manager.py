@@ -519,6 +519,14 @@ class HFCacheManager:
             return f"{n:.1f} PB"
 
         hub = _size(self.hub_cache)
+        # Also count models/ dir (oellm-cli / legacy HF cache path)
+        models_dir = self.hf_home / "models"
+        models_extra = 0
+        if models_dir.exists() and models_dir != self.hub_cache:
+            for entry in models_dir.iterdir():
+                if entry.is_dir() and entry.name.startswith("models--"):
+                    models_extra += _size(entry)
+        hub += models_extra
         ds = _size(self.datasets_cache)
         return {
             "hub_size": hub,
@@ -558,13 +566,20 @@ class HFCacheManager:
         print(f"   Total       : {stats['total_size_str']}")
 
         # List cached model snapshots with individual sizes
+        # Scan hub/ (standard HF path) and models/ (oellm-cli path)
         snapshots = sorted(glob.glob(str(self.hub_cache / "models--*")))
+        models_dir = self.hf_home / "models"
+        if models_dir.exists() and models_dir != self.hub_cache:
+            snapshots += sorted(glob.glob(str(models_dir / "models--*")))
         if snapshots:
             print(f"\n   📦 Cached models ({len(snapshots)}):")
             for s in snapshots:
                 name = Path(s).name.replace("models--", "").replace("--", "/")
                 size = _fmt(_dir_size(Path(s)))
-                print(f"     • {name}  ({size})")
+                loc = "models/" if str(models_dir) in s else "hub/"
+                print(f"     • {name}  ({size})  [{loc}]")
+        else:
+            print("\n   📦 No cached models found")
 
         # List cached datasets
         ds_dirs = sorted(glob.glob(str(self.datasets_cache / "*")))
@@ -581,7 +596,7 @@ class HFCacheManager:
         locks = list(self.hf_home.rglob("*.lock"))
         if locks:
             print(f"\n   ⚠️  {len(locks)} stale lock file(s) found")
-            print(f"      Run: python bin/hf_cache_manager.py clean")
+            print(f"      Run: hf-cache clean")
 
     # ───────────────────────────────────────────────────────────────
     #  Clean cache
